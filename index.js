@@ -28,7 +28,7 @@ function isAuthorized(member) {
 }
 
 // =====================================
-// AUTO VOICE JOIN
+// AUTO VOICE JOIN (Encryption Safe)
 // =====================================
 function joinAutoVoice() {
   const guild = client.guilds.cache.get(process.env.GUILD_ID)
