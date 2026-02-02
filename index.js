@@ -1,9 +1,10 @@
 // =====================================
-//  STABLE PUBLIC DISCORD BOT
+//  FINAL STABLE DISCORD BOT
 //  Railway + 24/7 Voice + Auth
+//  NO WARNINGS VERSION
 // =====================================
 
-import { Client, GatewayIntentBits } from "discord.js"
+import { Client, GatewayIntentBits, Events } from "discord.js"
 import { joinVoiceChannel, getVoiceConnection } from "@discordjs/voice"
 import express from "express"
 import dotenv from "dotenv"
@@ -16,13 +17,10 @@ dotenv.config()
 const app = express()
 const PORT = process.env.PORT || 3000
 
-app.get("/", (req, res) => {
-  res.send("Bot online")
-})
-
-app.listen(PORT, () => {
+app.get("/", (_, res) => res.send("Bot online"))
+app.listen(PORT, () =>
   console.log(`🌐 Uptime server aktif | ${PORT}`)
-})
+)
 
 // =====================================
 //  DISCORD CLIENT
@@ -63,9 +61,9 @@ function joinAutoVoice() {
 }
 
 // =====================================
-//  BOT READY
+//  BOT READY (NO WARNING)
 // =====================================
-client.once("ready", () => {
+client.once(Events.ClientReady, () => {
   console.log(`🟢 Bot aktif: ${client.user.tag}`)
   joinAutoVoice()
 })
@@ -73,20 +71,20 @@ client.once("ready", () => {
 // =====================================
 //  RECONNECT IF DROPPED
 // =====================================
-client.on("voiceStateUpdate", (_, newState) => {
+client.on(Events.VoiceStateUpdate, (_, newState) => {
   if (
     newState.member?.id === client.user.id &&
     !newState.channelId
   ) {
-    console.log("⚠️ Sesten düştü, tekrar giriliyor...")
+    console.log("⚠️ Sesten düştü, tekrar bağlanılıyor...")
     setTimeout(joinAutoVoice, 3000)
   }
 })
 
 // =====================================
-//  SLASH COMMAND HANDLER
+//  SLASH COMMANDS
 // =====================================
-client.on("interactionCreate", async interaction => {
+client.on(Events.InteractionCreate, async interaction => {
   if (!interaction.isChatInputCommand()) return
 
   const member = interaction.member
@@ -96,11 +94,11 @@ client.on("interactionCreate", async interaction => {
     return interaction.reply(`🏓 Pong! ${client.ws.ping}ms`)
   }
 
-  // yetkili kontrol
+  // auth check
   if (!isAuthorized(member)) {
     return interaction.reply({
       content: "❌ Yetkin yok.",
-      ephemeral: true
+      flags: 64 // EPHEMERAL
     })
   }
 
@@ -121,13 +119,13 @@ client.on("interactionCreate", async interaction => {
 // =====================================
 //  CRASH PROTECTION
 // =====================================
-process.on("unhandledRejection", err => {
+process.on("unhandledRejection", err =>
   console.error("UNHANDLED:", err)
-})
+)
 
-process.on("uncaughtException", err => {
+process.on("uncaughtException", err =>
   console.error("UNCAUGHT:", err)
-})
+)
 
 // =====================================
 //  LOGIN
