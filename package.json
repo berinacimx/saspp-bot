@@ -1,7 +1,7 @@
 {
   "name": "sasp-public-bot",
   "version": "1.0.0",
-  "description": "Railway uyumlu 24/7 sesli public Discord botu",
+  "description": "Railway uyumlu SASP public bot - 24/7 ses, yetkili komut, warningsiz",
   "type": "module",
   "main": "index.js",
   "scripts": {
