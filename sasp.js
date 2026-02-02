@@ -1,19 +1,19 @@
 // =====================================
 //  PUBLIC DISCORD BOT
-//  Railway + Uptime + 24/7 Voice
+//  24/7 VOICE + AUTO JOIN + AUTH
 // =====================================
 
-import { 
-  Client, 
-  GatewayIntentBits, 
-  SlashCommandBuilder, 
-  Routes 
+import {
+  Client,
+  GatewayIntentBits,
+  SlashCommandBuilder,
+  Routes
 } from "discord.js"
 
 import { REST } from "@discordjs/rest"
-import { 
-  joinVoiceChannel, 
-  getVoiceConnection 
+import {
+  joinVoiceChannel,
+  getVoiceConnection
 } from "@discordjs/voice"
 
 import express from "express"
@@ -50,6 +50,13 @@ const client = new Client({
 })
 
 // =====================================
+//  AUTH CHECK
+// =====================================
+function isAuthorized(member) {
+  return member.roles.cache.has(process.env.AUTHORIZED_ROLE_ID)
+}
+
+// =====================================
 //  SLASH COMMANDS
 // =====================================
 const commands = [
@@ -58,20 +65,16 @@ const commands = [
     .setDescription("Bot gecikmesini gösterir"),
 
   new SlashCommandBuilder()
-    .setName("join")
-    .setDescription("Botu bulunduğun ses kanalına sokar"),
+    .setName("247")
+    .setDescription("Botu 7/24 ses kanalına sokar (yetkili)"),
 
   new SlashCommandBuilder()
     .setName("leave")
-    .setDescription("Botu ses kanalından çıkarır"),
-
-  new SlashCommandBuilder()
-    .setName("247")
-    .setDescription("Botu 7/24 ses kanalında tutar"),
+    .setDescription("Botu ses kanalından çıkarır (yetkili)"),
 
   new SlashCommandBuilder()
     .setName("announce")
-    .setDescription("Public duyuru")
+    .setDescription("Yetkili duyuru")
     .addStringOption(opt =>
       opt.setName("mesaj")
         .setDescription("Duyuru mesajı")
@@ -96,10 +99,44 @@ async function registerCommands() {
 }
 
 // =====================================
+//  AUTO VOICE JOIN
+// =====================================
+function joinAutoVoice() {
+  const guild = client.guilds.cache.get(process.env.GUILD_ID)
+  if (!guild) return
+
+  const channel = guild.channels.cache.get(process.env.VOICE_CHANNEL_ID)
+  if (!channel) return
+
+  joinVoiceChannel({
+    channelId: channel.id,
+    guildId: guild.id,
+    adapterCreator: guild.voiceAdapterCreator,
+    selfDeaf: true
+  })
+
+  console.log("♾️ Otomatik ses kanalına girildi")
+}
+
+// =====================================
 //  BOT READY
 // =====================================
 client.once("ready", () => {
   console.log(`🟢 Bot aktif: ${client.user.tag}`)
+  joinAutoVoice()
+})
+
+// =====================================
+//  RECONNECT IF DROPPED
+// =====================================
+client.on("voiceStateUpdate", (_, newState) => {
+  if (
+    newState.member?.id === client.user.id &&
+    !newState.channelId
+  ) {
+    console.log("⚠️ Bot sesten düştü, tekrar giriliyor...")
+    setTimeout(joinAutoVoice, 3000)
+  }
 })
 
 // =====================================
@@ -108,56 +145,38 @@ client.once("ready", () => {
 client.on("interactionCreate", async interaction => {
   if (!interaction.isChatInputCommand()) return
 
+  const member = interaction.member
+
   // /ping
   if (interaction.commandName === "ping") {
     return interaction.reply(`🏓 Pong! ${client.ws.ping}ms`)
   }
 
-  // /join
-  if (interaction.commandName === "join") {
-    const channel = interaction.member.voice.channel
-    if (!channel)
-      return interaction.reply({ content: "❌ Ses kanalında değilsin.", ephemeral: true })
-
-    joinVoiceChannel({
-      channelId: channel.id,
-      guildId: channel.guild.id,
-      adapterCreator: channel.guild.voiceAdapterCreator
+  // Yetkili kontrol
+  if (!isAuthorized(member)) {
+    return interaction.reply({
+      content: "❌ Bu komutu kullanmak için yetkin yok.",
+      ephemeral: true
     })
-
-    return interaction.reply("🔊 Ses kanalına girdim.")
-  }
-
-  // /leave
-  if (interaction.commandName === "leave") {
-    const connection = getVoiceConnection(interaction.guild.id)
-    if (!connection)
-      return interaction.reply("❌ Zaten ses kanalında değilim.")
-
-    connection.destroy()
-    return interaction.reply("👋 Ses kanalından çıktım.")
   }
 
   // /247
   if (interaction.commandName === "247") {
-    const channel = interaction.member.voice.channel
-    if (!channel)
-      return interaction.reply({ content: "❌ Ses kanalına gir.", ephemeral: true })
+    joinAutoVoice()
+    return interaction.reply("♾️ 7/24 ses modu aktif.")
+  }
 
-    joinVoiceChannel({
-      channelId: channel.id,
-      guildId: channel.guild.id,
-      adapterCreator: channel.guild.voiceAdapterCreator,
-      selfDeaf: true
-    })
-
-    return interaction.reply("♾️ 7/24 ses moduna geçtim.")
+  // /leave
+  if (interaction.commandName === "leave") {
+    const conn = getVoiceConnection(interaction.guild.id)
+    if (conn) conn.destroy()
+    return interaction.reply("👋 Ses kanalından çıktım.")
   }
 
   // /announce
   if (interaction.commandName === "announce") {
     const mesaj = interaction.options.getString("mesaj")
-    return interaction.reply(`📢 **DUYURU**\n\n${mesaj}`)
+    return interaction.reply(`📢 **YETKİLİ DUYURU**\n\n${mesaj}`)
   }
 })
 
