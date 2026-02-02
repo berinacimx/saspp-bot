@@ -1,21 +1,10 @@
 // =====================================
-//  PUBLIC DISCORD BOT
-//  24/7 VOICE + AUTO JOIN + AUTH
+//  STABLE PUBLIC DISCORD BOT
+//  Railway + 24/7 Voice + Auth
 // =====================================
 
-import {
-  Client,
-  GatewayIntentBits,
-  SlashCommandBuilder,
-  Routes
-} from "discord.js"
-
-import { REST } from "@discordjs/rest"
-import {
-  joinVoiceChannel,
-  getVoiceConnection
-} from "@discordjs/voice"
-
+import { Client, GatewayIntentBits } from "discord.js"
+import { joinVoiceChannel, getVoiceConnection } from "@discordjs/voice"
 import express from "express"
 import dotenv from "dotenv"
 
@@ -28,15 +17,11 @@ const app = express()
 const PORT = process.env.PORT || 3000
 
 app.get("/", (req, res) => {
-  res.json({
-    status: "online",
-    bot: "Public Discord Bot",
-    uptime: process.uptime()
-  })
+  res.send("Bot online")
 })
 
 app.listen(PORT, () => {
-  console.log(`🌐 Uptime aktif | Port ${PORT}`)
+  console.log(`🌐 Uptime server aktif | ${PORT}`)
 })
 
 // =====================================
@@ -57,48 +42,6 @@ function isAuthorized(member) {
 }
 
 // =====================================
-//  SLASH COMMANDS
-// =====================================
-const commands = [
-  new SlashCommandBuilder()
-    .setName("ping")
-    .setDescription("Bot gecikmesini gösterir"),
-
-  new SlashCommandBuilder()
-    .setName("247")
-    .setDescription("Botu 7/24 ses kanalına sokar (yetkili)"),
-
-  new SlashCommandBuilder()
-    .setName("leave")
-    .setDescription("Botu ses kanalından çıkarır (yetkili)"),
-
-  new SlashCommandBuilder()
-    .setName("announce")
-    .setDescription("Yetkili duyuru")
-    .addStringOption(opt =>
-      opt.setName("mesaj")
-        .setDescription("Duyuru mesajı")
-        .setRequired(true)
-    )
-].map(c => c.toJSON())
-
-// =====================================
-//  COMMAND REGISTER
-// =====================================
-const rest = new REST({ version: "10" }).setToken(process.env.TOKEN)
-
-async function registerCommands() {
-  await rest.put(
-    Routes.applicationGuildCommands(
-      process.env.CLIENT_ID,
-      process.env.GUILD_ID
-    ),
-    { body: commands }
-  )
-  console.log("✅ Slash komutlar yüklendi")
-}
-
-// =====================================
 //  AUTO VOICE JOIN
 // =====================================
 function joinAutoVoice() {
@@ -112,10 +55,11 @@ function joinAutoVoice() {
     channelId: channel.id,
     guildId: guild.id,
     adapterCreator: guild.voiceAdapterCreator,
-    selfDeaf: true
+    selfDeaf: true,
+    selfMute: false
   })
 
-  console.log("♾️ Otomatik ses kanalına girildi")
+  console.log("♾️ Ses kanalına bağlanıldı")
 }
 
 // =====================================
@@ -134,13 +78,13 @@ client.on("voiceStateUpdate", (_, newState) => {
     newState.member?.id === client.user.id &&
     !newState.channelId
   ) {
-    console.log("⚠️ Bot sesten düştü, tekrar giriliyor...")
+    console.log("⚠️ Sesten düştü, tekrar giriliyor...")
     setTimeout(joinAutoVoice, 3000)
   }
 })
 
 // =====================================
-//  INTERACTIONS
+//  SLASH COMMAND HANDLER
 // =====================================
 client.on("interactionCreate", async interaction => {
   if (!interaction.isChatInputCommand()) return
@@ -152,10 +96,10 @@ client.on("interactionCreate", async interaction => {
     return interaction.reply(`🏓 Pong! ${client.ws.ping}ms`)
   }
 
-  // Yetkili kontrol
+  // yetkili kontrol
   if (!isAuthorized(member)) {
     return interaction.reply({
-      content: "❌ Bu komutu kullanmak için yetkin yok.",
+      content: "❌ Yetkin yok.",
       ephemeral: true
     })
   }
@@ -172,16 +116,20 @@ client.on("interactionCreate", async interaction => {
     if (conn) conn.destroy()
     return interaction.reply("👋 Ses kanalından çıktım.")
   }
-
-  // /announce
-  if (interaction.commandName === "announce") {
-    const mesaj = interaction.options.getString("mesaj")
-    return interaction.reply(`📢 **YETKİLİ DUYURU**\n\n${mesaj}`)
-  }
 })
 
 // =====================================
-//  START
+//  CRASH PROTECTION
 // =====================================
-registerCommands()
+process.on("unhandledRejection", err => {
+  console.error("UNHANDLED:", err)
+})
+
+process.on("uncaughtException", err => {
+  console.error("UNCAUGHT:", err)
+})
+
+// =====================================
+//  LOGIN
+// =====================================
 client.login(process.env.TOKEN)
