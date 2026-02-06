@@ -1,119 +1,187 @@
-import { Client, GatewayIntentBits, Events } from "discord.js"
-import { joinVoiceChannel, getVoiceConnection } from "@discordjs/voice"
-import express from "express"
-import dotenv from "dotenv"
+const {
+  Client,
+  GatewayIntentBits,
+  SlashCommandBuilder,
+  PermissionsBitField,
+  Events,
+  ActivityType
+} = require("discord.js");
 
-dotenv.config()
+const {
+  joinVoiceChannel,
+  getVoiceConnection,
+  VoiceConnectionStatus
+} = require("@discordjs/voice");
 
-// =====================================
-// UPTIME SERVER
-// =====================================
-const app = express()
-app.get("/", (_, res) => res.send("Bot online"))
-const PORT = process.env.PORT || 3000
-app.listen(PORT, () => console.log(`🌐 Uptime server aktif | ${PORT}`))
+const fs = require("fs");
 
-// =====================================
-// DISCORD CLIENT
-// =====================================
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates]
-})
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildVoiceStates
+  ]
+});
 
-// =====================================
-// AUTH CHECK
-// =====================================
-function isAuthorized(member) {
-  return member.roles.cache.has(process.env.AUTHORIZED_ROLE_ID)
-}
+/* ========= AYARLAR ========= */
+const GUILD_ID = "SUNUCU_ID";
+const VOICE_CHANNEL_ID = "SES_KANAL_ID";
+const YETKILI_ROLE_ID = "YETKILI_ROLE_ID";
+/* ========================== */
 
-// =====================================
-// AUTO VOICE JOIN (Encryption Safe)
-// =====================================
-function joinAutoVoice() {
-  const guild = client.guilds.cache.get(process.env.GUILD_ID)
-  if (!guild) return
+const SICIL_FILE = "./sicil.json";
 
-  const channel = guild.channels.cache.get(process.env.VOICE_CHANNEL_ID)
-  if (!channel) return
+/* 🔊 SES BAĞLANTISI */
+function connectVoice() {
+  const guild = client.guilds.cache.get(GUILD_ID);
+  if (!guild) return;
 
-  joinVoiceChannel({
+  const channel = guild.channels.cache.get(VOICE_CHANNEL_ID);
+  if (!channel) return;
+
+  const connection = joinVoiceChannel({
     channelId: channel.id,
     guildId: guild.id,
     adapterCreator: guild.voiceAdapterCreator,
     selfDeaf: true,
     selfMute: false
-  })
+  });
 
-  console.log("♾️ Ses kanalına bağlanıldı")
+  connection.on(VoiceConnectionStatus.Disconnected, () => {
+    console.log("⚠️ Ses düştü → yeniden bağlanıyor");
+    setTimeout(connectVoice, 3000);
+  });
 }
 
-// =====================================
-// BOT READY
-// =====================================
-client.once(Events.ClientReady, () => {
-  console.log(`🟢 Bot aktif: ${client.user.tag}`)
-  joinAutoVoice()
-})
+/* 🟢 READY */
+client.once(Events.ClientReady, async () => {
+  console.log("🟢 Bot aktif");
 
-// =====================================
-// RECONNECT IF DROPPED
-// =====================================
-client.on(Events.VoiceStateUpdate, (_, newState) => {
-  if (newState.member?.id === client.user.id && !newState.channelId) {
-    console.log("⚠️ Sesten düştü, tekrar bağlanıyor...")
-    setTimeout(joinAutoVoice, 3000)
+  connectVoice();
+
+  /* Slash kayıt */
+  const commands = [
+    new SlashCommandBuilder()
+      .setName("sicil")
+      .setDescription("Sicil işlemleri")
+      .addSubcommand(s =>
+        s.setName("ekle")
+          .setDescription("Sicil ekle")
+          .addUserOption(o => o.setName("kullanıcı").setRequired(true))
+          .addStringOption(o => o.setName("sebep").setRequired(true))
+      )
+      .addSubcommand(s =>
+        s.setName("sil")
+          .setDescription("Sicil sil")
+          .addUserOption(o => o.setName("kullanıcı").setRequired(true))
+      )
+      .addSubcommand(s =>
+        s.setName("görüntüle")
+          .setDescription("Sicil görüntüle")
+          .addUserOption(o => o.setName("kullanıcı").setRequired(true))
+      ),
+
+    new SlashCommandBuilder()
+      .setName("ban")
+      .setDescription("Ban at")
+      .addUserOption(o => o.setName("kullanıcı").setRequired(true))
+      .addStringOption(o => o.setName("sebep")),
+
+    new SlashCommandBuilder()
+      .setName("kick")
+      .setDescription("Kick at")
+      .addUserOption(o => o.setName("kullanıcı").setRequired(true))
+      .addStringOption(o => o.setName("sebep")),
+
+    new SlashCommandBuilder()
+      .setName("timeout")
+      .setDescription("Timeout at")
+      .addUserOption(o => o.setName("kullanıcı").setRequired(true))
+      .addIntegerOption(o => o.setName("dakika").setRequired(true))
+      .addStringOption(o => o.setName("sebep"))
+  ];
+
+  const guild = await client.guilds.fetch(GUILD_ID);
+  await guild.commands.set(commands);
+});
+
+/* 🔁 ATILIRSA GERİ GİR */
+client.on(Events.VoiceStateUpdate, (oldState, newState) => {
+  if (oldState.member?.id !== client.user.id) return;
+  if (oldState.channelId && !newState.channelId) {
+    console.log("⚠️ Sesten atıldı → geri giriliyor");
+    setTimeout(connectVoice, 2000);
   }
-})
+});
 
-// =====================================
-// SLASH COMMANDS
-// =====================================
-client.on(Events.InteractionCreate, async interaction => {
-  if (!interaction.isChatInputCommand()) return
+/* 🧾 SICIL YARDIMCI */
+function readSicil() {
+  return JSON.parse(fs.readFileSync(SICIL_FILE));
+}
+function writeSicil(data) {
+  fs.writeFileSync(SICIL_FILE, JSON.stringify(data, null, 2));
+}
 
-  const member = interaction.member
+/* ⚙️ SLASH KOMUTLAR */
+client.on(Events.InteractionCreate, async i => {
+  if (!i.isChatInputCommand()) return;
 
-  // /ping
-  if (interaction.commandName === "ping") {
-    return interaction.reply(`🏓 Pong! ${client.ws.ping}ms`)
+  const member = i.member;
+  if (!member.roles.cache.has(YETKILI_ROLE_ID))
+    return i.reply({ content: "❌ Yetkin yok", ephemeral: true });
+
+  const sicil = readSicil();
+
+  /* SICIL */
+  if (i.commandName === "sicil") {
+    const user = i.options.getUser("kullanıcı");
+
+    if (i.options.getSubcommand() === "ekle") {
+      const sebep = i.options.getString("sebep");
+      sicil[user.id] ??= [];
+      sicil[user.id].push(sebep);
+      writeSicil(sicil);
+      return i.reply(`✅ ${user.tag} siciline eklendi`);
+    }
+
+    if (i.options.getSubcommand() === "sil") {
+      delete sicil[user.id];
+      writeSicil(sicil);
+      return i.reply(`🗑️ ${user.tag} sicili silindi`);
+    }
+
+    if (i.options.getSubcommand() === "görüntüle") {
+      const list = sicil[user.id]?.join("\n• ") || "Kayıt yok";
+      return i.reply(`📄 **${user.tag} Sicil**\n• ${list}`);
+    }
   }
 
-  // Yetkili kontrol
-  if (!isAuthorized(member)) {
-    return interaction.reply({
-      content: "❌ Yetkin yok.",
-      flags: 64 // EPHEMERAL
-    })
+  /* BAN */
+  if (i.commandName === "ban") {
+    const user = i.options.getUser("kullanıcı");
+    const sebep = i.options.getString("sebep") || "Sebep yok";
+    await i.guild.members.ban(user.id, { reason: sebep });
+    return i.reply(`⛔ ${user.tag} banlandı`);
   }
 
-  // /247
-  if (interaction.commandName === "247") {
-    joinAutoVoice()
-    return interaction.reply("♾️ 7/24 ses modu aktif.")
+  /* KICK */
+  if (i.commandName === "kick") {
+    const user = i.options.getUser("kullanıcı");
+    const sebep = i.options.getString("sebep") || "Sebep yok";
+    await i.guild.members.kick(user.id, sebep);
+    return i.reply(`👢 ${user.tag} kicklendi`);
   }
 
-  // /leave
-  if (interaction.commandName === "leave") {
-    const conn = getVoiceConnection(interaction.guild.id)
-    if (conn) conn.destroy()
-    return interaction.reply("👋 Ses kanalından çıktım.")
+  /* TIMEOUT */
+  if (i.commandName === "timeout") {
+    const user = i.options.getUser("kullanıcı");
+    const dakika = i.options.getInteger("dakika");
+    const sebep = i.options.getString("sebep") || "Sebep yok";
+
+    const m = await i.guild.members.fetch(user.id);
+    await m.timeout(dakika * 60 * 1000, sebep);
+    return i.reply(`⏱️ ${user.tag} ${dakika} dk timeout`);
   }
+});
 
-  // /announce
-  if (interaction.commandName === "announce") {
-    const mesaj = interaction.options.getString("mesaj")
-    return interaction.reply(`📢 DUYURU: ${mesaj}`)
-  }
-})
-
-// =====================================
-// CRASH PROTECTION
-// =====================================
-process.on("unhandledRejection", err => console.error("UNHANDLED:", err))
-process.on("uncaughtException", err => console.error("UNCAUGHT:", err))
-
-// =====================================
-// LOGIN
-// =====================================
-client.login(process.env.TOKEN)
+client.login(process.env.TOKEN);
