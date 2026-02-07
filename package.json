@@ -1,5 +1,5 @@
 {
-  "name": "discord-welcome-bot",
+  "name": "discord-voice-bot",
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "discord.js": "^14.14.1",
+    "@discordjs/voice": "^0.16.0",
     "dotenv": "^16.4.5"
   }
 }
