@@ -1,25 +1,19 @@
-/* ================= ENV & FIX ================= */
-process.env.DISCORDJS_VOICE_FORCE_AES256 = "true"
 require("dotenv").config()
 
-/* ================= IMPORTS ================= */
-const { 
-  Client, 
-  GatewayIntentBits, 
-  Events, 
-  ActivityType 
+const {
+  Client,
+  GatewayIntentBits,
+  Events
 } = require("discord.js")
 
 const {
   joinVoiceChannel,
-  getVoiceConnection,
   VoiceConnectionStatus,
   entersState
 } = require("@discordjs/voice")
 
-const http = require("http")
-
 /* ================= CLIENT ================= */
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -28,102 +22,124 @@ const client = new Client({
   ]
 })
 
-/* ================= UPTIME ================= */
-http.createServer((req, res) => {
-  res.end("OK")
-}).listen(process.env.PORT || 3000)
+/* ================= VOICE MANAGER ================= */
 
-/* ================= VOICE ================= */
-let reconnecting = false
+let voiceConnection = null
+let reconnectTimeout = null
 
-async function connectVoice() {
-  if (reconnecting) return
-  reconnecting = true
-
+async function connectToVoice() {
   try {
     const guild = await client.guilds.fetch(process.env.GUILD_ID)
-    const channel = guild.channels.cache.get(process.env.VOICE_CHANNEL_ID)
+    const channel = await guild.channels.fetch(process.env.VOICE_CHANNEL_ID)
 
-    if (!channel || !channel.isVoiceBased()) {
-      console.log("❌ Ses kanalı yok")
-      reconnecting = false
+    if (!channel || channel.type !== 2) {
+      console.log("❌ Ses kanalı bulunamadı veya geçersiz")
       return
     }
 
-    const existing = getVoiceConnection(guild.id)
-    if (existing) {
-      reconnecting = false
-      return
-    }
-
-    const connection = joinVoiceChannel({
+    voiceConnection = joinVoiceChannel({
       channelId: channel.id,
       guildId: guild.id,
       adapterCreator: guild.voiceAdapterCreator,
-      selfDeaf: true,
-      selfMute: false
+      selfMute: false,
+      selfDeaf: false
     })
 
-    await entersState(connection, VoiceConnectionStatus.Ready, 15_000)
-    console.log("🔊 Ses kanalına girildi")
+    console.log("🔊 Bot sese bağlandı")
 
-    connection.on(VoiceConnectionStatus.Disconnected, async () => {
-      console.log("⚠️ Ses bağlantısı koptu")
+    voiceConnection.on(VoiceConnectionStatus.Disconnected, async () => {
+      console.log("⚠️ Ses bağlantısı koptu, tekrar bağlanılıyor...")
+
       try {
         await Promise.race([
-          entersState(connection, VoiceConnectionStatus.Signalling, 5_000),
-          entersState(connection, VoiceConnectionStatus.Connecting, 5_000)
+          entersState(voiceConnection, VoiceConnectionStatus.Signalling, 5_000),
+          entersState(voiceConnection, VoiceConnectionStatus.Connecting, 5_000)
         ])
       } catch {
-        console.log("🔁 Yeniden bağlanılıyor...")
-        setTimeout(() => {
-          reconnecting = false
-          connectVoice()
-        }, 5000)
+        reconnectVoice()
       }
     })
 
+    voiceConnection.on("error", err => {
+      console.error("🔴 Ses hatası:", err.message)
+      reconnectVoice()
+    })
+
   } catch (err) {
-    console.error("Ses hatası:", err.message)
-    setTimeout(() => {
-      reconnecting = false
-      connectVoice()
-    }, 7000)
+    console.error("🔴 Ses bağlantı hatası:", err.message)
+    reconnectVoice()
   }
 }
 
+function reconnectVoice() {
+  if (reconnectTimeout) return
+
+  reconnectTimeout = setTimeout(() => {
+    reconnectTimeout = null
+    connectToVoice()
+  }, 10_000)
+}
+
 /* ================= READY ================= */
-client.once(Events.ClientReady, async () => {
+
+client.once(Events.ClientReady, () => {
   console.log(`🟢 Aktif: ${client.user.tag}`)
+  console.log("✅ Slash komutlar yüklendi")
 
-  await connectVoice()
+  connectToVoice()
 
-  /* Presence — RATE LIMIT SAFE */
-  client.user.setPresence({
-    activities: [
-      { name: "San Andreas State Police #DESTAN", type: ActivityType.Playing }
-    ],
-    status: "online"
-  })
+  // Presence rate-limit yemesin diye 60 sn
+  setInterval(() => {
+    client.user.setPresence({
+      activities: [{ name: "San Andreas State Police", type: 3 }],
+      status: "online"
+    })
+  }, 60_000)
 })
 
-/* ================= ATILIRSA ================= */
-client.on(Events.VoiceStateUpdate, (oldState, newState) => {
-  if (oldState.member?.id !== client.user.id) return
-  if (oldState.channelId && !newState.channelId) {
-    console.log("❌ Sesten atıldı")
-    setTimeout(connectVoice, 3000)
+/* ================= GUILD MEMBER ADD ================= */
+
+client.on(Events.GuildMemberAdd, async member => {
+  try {
+    /* 👋 HOŞGELDİN */
+    const welcome = member.guild.channels.cache.get(process.env.HOSGELDIN_KANAL_ID)
+    if (welcome) {
+      await welcome.send(
+        `<@${member.id}> Sunucumuza hoş geldin 👋\n` +
+        `Başvuru ve bilgilendirme kanallarını incelemeyi unutma.\n\n` +
+        `**San Andreas State Police #𝐃𝐄𝐒𝐓𝐀𝐍**`
+      )
+    }
+
+    /* 🔔 ETİKET AT → SİL */
+    const kanalList = (process.env.ETIKET_KANALLAR || "")
+      .split(",")
+      .map(x => x.trim())
+      .filter(Boolean)
+
+    for (const id of kanalList) {
+      const ch = member.guild.channels.cache.get(id)
+      if (!ch) continue
+
+      const msg = await ch.send(`<@${member.id}>`)
+      setTimeout(() => msg.delete().catch(() => {}), 3000)
+    }
+
+  } catch (err) {
+    console.error("Üye giriş hatası:", err.message)
   }
 })
 
-/* ================= SAFETY ================= */
+/* ================= ERROR GUARD ================= */
+
 process.on("unhandledRejection", err => {
-  console.error("Unhandled:", err.message)
+  console.error("⚠️ Unhandled Rejection:", err.message)
 })
 
 process.on("uncaughtException", err => {
-  console.error("Crash:", err.message)
+  console.error("🔥 Uncaught Exception:", err.message)
 })
 
 /* ================= LOGIN ================= */
+
 client.login(process.env.TOKEN)
