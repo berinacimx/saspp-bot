@@ -10,59 +10,83 @@ const {
 const {
   joinVoiceChannel,
   getVoiceConnection,
-  VoiceConnectionStatus
+  VoiceConnectionStatus,
+  entersState
 } = require("@discordjs/voice")
 
 const http = require("http")
 
-/* ========= CLIENT ========= */
+/* ================= CLIENT ================= */
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildPresences,
-    GatewayIntentBits.GuildVoiceStates // 🔥 SES İÇİN ŞART
+    GatewayIntentBits.GuildVoiceStates
   ]
 })
 
-/* ========= UPTIME ========= */
-http.createServer((req, res) => {
+/* ================= UPTIME ================= */
+http.createServer((_, res) => {
   res.writeHead(200)
   res.end("OK")
 }).listen(process.env.PORT || 3000)
 
-/* ========= SES BAĞLANTISI ========= */
-function connectVoice() {
-  const guild = client.guilds.cache.get(process.env.GUILD_ID)
-  if (!guild) return console.log("❌ Guild yok")
+/* ================= SES KONTROL ================= */
+let reconnecting = false
 
-  const channel = guild.channels.cache.get(process.env.VOICE_CHANNEL_ID)
-  if (!channel?.isVoiceBased())
-    return console.log("❌ Ses kanalı bulunamadı")
+async function connectVoice(force = false) {
+  try {
+    const guild = client.guilds.cache.get(process.env.GUILD_ID)
+    if (!guild) return console.log("❌ Guild bulunamadı")
 
-  if (getVoiceConnection(guild.id)) return
+    const channel = guild.channels.cache.get(process.env.VOICE_CHANNEL_ID)
+    if (!channel || !channel.isVoiceBased())
+      return console.log("❌ Ses kanalı geçersiz")
 
-  const connection = joinVoiceChannel({
-    channelId: channel.id,
-    guildId: guild.id,
-    adapterCreator: guild.voiceAdapterCreator,
-    selfDeaf: true
-  })
+    const existing = getVoiceConnection(guild.id)
+    if (existing && !force) return
 
-  connection.on(VoiceConnectionStatus.Ready, () => {
-    console.log("🔊 Ses kanalına girildi")
-  })
+    if (existing) existing.destroy()
 
-  connection.on(VoiceConnectionStatus.Disconnected, () => {
-    console.log("⚠️ Ses düştü → yeniden bağlanıyor")
-    setTimeout(connectVoice, 3000)
-  })
+    const connection = joinVoiceChannel({
+      channelId: channel.id,
+      guildId: guild.id,
+      adapterCreator: guild.voiceAdapterCreator,
+      selfDeaf: true,
+      selfMute: false
+    })
+
+    await entersState(connection, VoiceConnectionStatus.Ready, 30_000)
+    console.log("🔊 Ses kanalına bağlanıldı")
+
+    connection.on(VoiceConnectionStatus.Disconnected, () => retryVoice())
+    connection.on(VoiceConnectionStatus.Destroyed, () => retryVoice())
+    connection.on(VoiceConnectionStatus.Signalling, () => retryVoice())
+
+  } catch (err) {
+    console.error("❌ Ses bağlantı hatası:", err)
+    retryVoice()
+  }
 }
 
-/* ========= READY ========= */
+function retryVoice() {
+  if (reconnecting) return
+  reconnecting = true
+
+  console.log("⚠️ Ses düştü → yeniden bağlanılıyor")
+
+  setTimeout(async () => {
+    reconnecting = false
+    await connectVoice(true)
+  }, 5000)
+}
+
+/* ================= READY ================= */
 client.once(Events.ClientReady, async () => {
   console.log(`🟢 Aktif: ${client.user.tag}`)
-  connectVoice()
+
+  await connectVoice()
 
   const guild = await client.guilds.fetch(process.env.GUILD_ID)
   let mode = 0
@@ -87,7 +111,7 @@ client.once(Events.ClientReady, async () => {
   }, 15_000)
 })
 
-/* ========= ÜYE GİRİNCE ========= */
+/* ================= ÜYE GİRİNCE ================= */
 client.on(Events.GuildMemberAdd, async member => {
   try {
     const ch = member.guild.channels.cache.get(process.env.HOSGELDIN_KANAL_ID)
@@ -105,11 +129,15 @@ client.on(Events.GuildMemberAdd, async member => {
       const msg = await c.send(`<@${member.id}>`)
       setTimeout(() => msg.delete().catch(() => {}), 3000)
     }
-  } catch {}
+  } catch (e) {
+    console.error("Üye giriş hatası:", e)
+  }
 })
 
-/* ========= GÜVENLİK ========= */
+/* ================= GÜVENLİK ================= */
 process.on("unhandledRejection", console.error)
+process.on("uncaughtException", console.error)
 client.on("error", console.error)
 
+/* ================= LOGIN ================= */
 client.login(process.env.TOKEN)
