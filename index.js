@@ -98,7 +98,10 @@ client.on(Events.GuildMemberAdd, async member => {
   try {
     const welcome = member.guild.channels.cache.get(process.env.HOSGELDIN_KANAL_ID)
     if (welcome) {
-      await welcome.send(`<@${member.id}> Sunucumuza hoş geldin 👋`)
+      await welcome.send(`<@${member.id}> Sunucumuza hoş geldin 👋
+Başvuru ve bilgilendirme kanallarını incelemeyi unutma.
+
+San Andreas State Police #𝐃𝐄𝐒𝐓𝐀𝐍`)
     }
 
     const list = (process.env.ETIKET_KANALLAR || "")
@@ -121,3 +124,4 @@ process.on("uncaughtException", e => console.error("Crash:", e.message))
 /* ================= LOGIN ================= */
 
 client.login(process.env.TOKEN)
+
