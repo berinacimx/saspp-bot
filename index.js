@@ -1,12 +1,7 @@
-/* ======================================================
-   🔐 VOICE ENCRYPTION FIX (EN ÜSTE)
-====================================================== */
+/* 🔐 VOICE ENCRYPTION FIX (EN ÜSTE) */
 process.env.DISCORDJS_VOICE_FORCE_AES256 = "true"
 require("dotenv").config()
 
-/* ======================================================
-   📦 IMPORTS
-====================================================== */
 const {
   Client,
   GatewayIntentBits,
@@ -17,14 +12,13 @@ const {
 const {
   joinVoiceChannel,
   getVoiceConnection,
-  VoiceConnectionStatus
+  VoiceConnectionStatus,
+  entersState
 } = require("@discordjs/voice")
 
 const http = require("http")
 
-/* ======================================================
-   🤖 CLIENT
-====================================================== */
+/* ================= CLIENT ================= */
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -34,26 +28,28 @@ const client = new Client({
   ]
 })
 
-/* ======================================================
-   🌐 UPTIME (Railway / Render / Replit uyumlu)
-====================================================== */
+/* ================= UPTIME ================= */
 http.createServer((req, res) => {
   res.writeHead(200)
   res.end("OK")
 }).listen(process.env.PORT || 3000)
 
-/* ======================================================
-   🔊 SES KANALI (AUTO RECONNECT)
-====================================================== */
-async function connectVoice() {
+/* ================= SES SİSTEMİ ================= */
+async function connectVoice(force = false) {
   try {
     const guild = await client.guilds.fetch(process.env.GUILD_ID)
     if (!guild) return
 
-    const channel = guild.channels.cache.get(process.env.VOICE_CHANNEL_ID)
-    if (!channel || !channel.isVoiceBased()) return
+    const channel = await guild.channels.fetch(process.env.VOICE_CHANNEL_ID)
+    if (!channel || !channel.isVoiceBased()) {
+      console.log("❌ Ses kanalı bulunamadı")
+      return
+    }
 
-    if (getVoiceConnection(guild.id)) return
+    const existing = getVoiceConnection(guild.id)
+    if (existing && !force) return
+
+    if (existing) existing.destroy()
 
     const connection = joinVoiceChannel({
       channelId: channel.id,
@@ -67,19 +63,25 @@ async function connectVoice() {
       console.log("🔊 Ses kanalına bağlanıldı")
     })
 
-    connection.on(VoiceConnectionStatus.Disconnected, () => {
-      console.log("⚠️ Ses düştü, yeniden bağlanıyor...")
-      setTimeout(connectVoice, 5000)
+    connection.on(VoiceConnectionStatus.Disconnected, async () => {
+      console.log("⚠️ Ses düştü, yeniden bağlanılıyor...")
+      setTimeout(() => connectVoice(true), 5000)
     })
+
+    connection.on(VoiceConnectionStatus.Destroyed, () => {
+      console.log("❌ Ses bağlantısı destroy oldu, yeniden başlatılıyor...")
+      setTimeout(() => connectVoice(true), 5000)
+    })
+
+    await entersState(connection, VoiceConnectionStatus.Ready, 20_000)
+
   } catch (err) {
     console.error("Ses bağlantı hatası:", err.message)
-    setTimeout(connectVoice, 5000)
+    setTimeout(() => connectVoice(true), 5000)
   }
 }
 
-/* ======================================================
-   🟢 READY
-====================================================== */
+/* ================= READY ================= */
 client.once(Events.ClientReady, async () => {
   console.log(`🟢 Aktif: ${client.user.tag}`)
 
@@ -88,10 +90,9 @@ client.once(Events.ClientReady, async () => {
   const guild = await client.guilds.fetch(process.env.GUILD_ID)
   let mode = 0
 
-  setInterval(async () => {
+  /* 🔥 RATE-LIMIT SAFE PRESENCE */
+  setInterval(() => {
     try {
-      await guild.members.fetch({ withPresences: true })
-
       const total = guild.memberCount
       const online = guild.members.cache.filter(
         m => m.presence && m.presence.status !== "offline"
@@ -108,18 +109,13 @@ client.once(Events.ClientReady, async () => {
       })
 
       mode = (mode + 1) % 2
-    } catch (e) {
-      console.error("Presence hatası:", e.message)
-    }
-  }, 15000)
+    } catch {}
+  }, 60000) // ⏱️ 60 sn = SAFE
 })
 
-/* ======================================================
-   👤 ÜYE GİRİNCE
-====================================================== */
+/* ================= ÜYE GİRİNCE ================= */
 client.on(Events.GuildMemberAdd, async member => {
   try {
-    /* 👋 HOŞGELDİN */
     const welcome = member.guild.channels.cache.get(process.env.HOSGELDIN_KANAL_ID)
     if (welcome) {
       await welcome.send(
@@ -129,7 +125,6 @@ client.on(Events.GuildMemberAdd, async member => {
       )
     }
 
-    /* 🔔 ETİKET AT → SİL */
     const kanalList = (process.env.ETIKET_KANALLAR || "")
       .split(",")
       .map(x => x.trim())
@@ -138,7 +133,6 @@ client.on(Events.GuildMemberAdd, async member => {
     for (const id of kanalList) {
       const ch = member.guild.channels.cache.get(id)
       if (!ch) continue
-
       const msg = await ch.send(`<@${member.id}>`)
       setTimeout(() => msg.delete().catch(() => {}), 3000)
     }
@@ -147,9 +141,7 @@ client.on(Events.GuildMemberAdd, async member => {
   }
 })
 
-/* ======================================================
-   🛡️ GLOBAL KORUMA (CRASH YEMEZ)
-====================================================== */
+/* ================= KORUMA ================= */
 process.on("unhandledRejection", err => {
   console.error("Unhandled Rejection:", err)
 })
@@ -160,7 +152,5 @@ process.on("uncaughtException", err => {
 
 client.on("error", console.error)
 
-/* ======================================================
-   🔐 LOGIN
-====================================================== */
+/* ================= LOGIN ================= */
 client.login(process.env.TOKEN)
