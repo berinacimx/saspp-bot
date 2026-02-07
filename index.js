@@ -1,187 +1,159 @@
+require("dotenv").config();
+
 const {
   Client,
   GatewayIntentBits,
+  Partials,
+  ActivityType,
   SlashCommandBuilder,
-  PermissionsBitField,
-  Events,
-  ActivityType
+  PermissionsBitField
 } = require("discord.js");
 
 const {
   joinVoiceChannel,
-  getVoiceConnection,
-  VoiceConnectionStatus
+  getVoiceConnection
 } = require("@discordjs/voice");
 
-const fs = require("fs");
-
+/* ================== CLIENT ================== */
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildPresences,
     GatewayIntentBits.GuildVoiceStates
-  ]
+  ],
+  partials: [Partials.GuildMember]
 });
 
-/* ========= AYARLAR ========= */
-const GUILD_ID = "SUNUCU_ID";
-const VOICE_CHANNEL_ID = "SES_KANAL_ID";
-const YETKILI_ROLE_ID = "YETKILI_ROLE_ID";
-/* ========================== */
+/* ================== AYARLAR ================== */
+const GUILD_ID = process.env.GUILD_ID;
+const VOICE_CHANNEL_ID = process.env.VOICE_CHANNEL_ID;
 
-const SICIL_FILE = "./sicil.json";
-
-/* 🔊 SES BAĞLANTISI */
-function connectVoice() {
-  const guild = client.guilds.cache.get(GUILD_ID);
-  if (!guild) return;
-
+/* ================== SES ================== */
+function connectVoice(guild) {
   const channel = guild.channels.cache.get(VOICE_CHANNEL_ID);
   if (!channel) return;
 
-  const connection = joinVoiceChannel({
+  joinVoiceChannel({
     channelId: channel.id,
     guildId: guild.id,
     adapterCreator: guild.voiceAdapterCreator,
-    selfDeaf: true,
-    selfMute: false
+    selfDeaf: true,   // kulaklık kapalı
+    selfMute: false   // mikrofon açık (boş)
   });
 
-  connection.on(VoiceConnectionStatus.Disconnected, () => {
-    console.log("⚠️ Ses düştü → yeniden bağlanıyor");
-    setTimeout(connectVoice, 3000);
-  });
+  console.log("🔊 Ses kanalına bağlandı");
 }
 
-/* 🟢 READY */
-client.once(Events.ClientReady, async () => {
-  console.log("🟢 Bot aktif");
+/* ================== READY ================== */
+client.once("ready", async () => {
+  console.log(`🟢 Aktif: ${client.user.tag}`);
 
-  connectVoice();
+  const guild = await client.guilds.fetch(GUILD_ID);
 
-  /* Slash kayıt */
+  /* BOT DURUM */
+  client.user.setPresence({
+    activities: [
+      {
+        name: "San Andreas State Police",
+        type: ActivityType.Playing
+      }
+    ],
+    status: "online"
+  });
+
+  /* SLASH KOMUTLAR */
   const commands = [
     new SlashCommandBuilder()
-      .setName("sicil")
-      .setDescription("Sicil işlemleri")
-      .addSubcommand(s =>
-        s.setName("ekle")
-          .setDescription("Sicil ekle")
-          .addUserOption(o => o.setName("kullanıcı").setRequired(true))
-          .addStringOption(o => o.setName("sebep").setRequired(true))
-      )
-      .addSubcommand(s =>
-        s.setName("sil")
-          .setDescription("Sicil sil")
-          .addUserOption(o => o.setName("kullanıcı").setRequired(true))
-      )
-      .addSubcommand(s =>
-        s.setName("görüntüle")
-          .setDescription("Sicil görüntüle")
-          .addUserOption(o => o.setName("kullanıcı").setRequired(true))
+      .setName("ping")
+      .setDescription("Bot gecikmesini gösterir"),
+
+    new SlashCommandBuilder()
+      .setName("kick")
+      .setDescription("Kullanıcıyı atar")
+      .addUserOption(o =>
+        o.setName("kullanıcı")
+          .setDescription("Atılacak kişi")
+          .setRequired(true)
       ),
 
     new SlashCommandBuilder()
       .setName("ban")
-      .setDescription("Ban at")
-      .addUserOption(o => o.setName("kullanıcı").setRequired(true))
-      .addStringOption(o => o.setName("sebep")),
-
-    new SlashCommandBuilder()
-      .setName("kick")
-      .setDescription("Kick at")
-      .addUserOption(o => o.setName("kullanıcı").setRequired(true))
-      .addStringOption(o => o.setName("sebep")),
+      .setDescription("Kullanıcıyı yasaklar")
+      .addUserOption(o =>
+        o.setName("kullanıcı")
+          .setDescription("Banlanacak kişi")
+          .setRequired(true)
+      ),
 
     new SlashCommandBuilder()
       .setName("timeout")
-      .setDescription("Timeout at")
-      .addUserOption(o => o.setName("kullanıcı").setRequired(true))
-      .addIntegerOption(o => o.setName("dakika").setRequired(true))
-      .addStringOption(o => o.setName("sebep"))
+      .setDescription("Susturma verir")
+      .addUserOption(o =>
+        o.setName("kullanıcı")
+          .setDescription("Susturulacak kişi")
+          .setRequired(true)
+      )
+      .addIntegerOption(o =>
+        o.setName("süre")
+          .setDescription("Dakika")
+          .setRequired(true)
+      )
   ];
 
-  const guild = await client.guilds.fetch(GUILD_ID);
   await guild.commands.set(commands);
+  console.log("✅ Slash komutlar temiz yüklendi");
+
+  /* SES BAĞLAN */
+  connectVoice(guild);
 });
 
-/* 🔁 ATILIRSA GERİ GİR */
-client.on(Events.VoiceStateUpdate, (oldState, newState) => {
-  if (oldState.member?.id !== client.user.id) return;
-  if (oldState.channelId && !newState.channelId) {
-    console.log("⚠️ Sesten atıldı → geri giriliyor");
-    setTimeout(connectVoice, 2000);
-  }
-});
+/* ================== KOMUTLAR ================== */
+client.on("interactionCreate", async interaction => {
+  if (!interaction.isChatInputCommand()) return;
 
-/* 🧾 SICIL YARDIMCI */
-function readSicil() {
-  return JSON.parse(fs.readFileSync(SICIL_FILE));
-}
-function writeSicil(data) {
-  fs.writeFileSync(SICIL_FILE, JSON.stringify(data, null, 2));
-}
+  const member = interaction.member;
 
-/* ⚙️ SLASH KOMUTLAR */
-client.on(Events.InteractionCreate, async i => {
-  if (!i.isChatInputCommand()) return;
-
-  const member = i.member;
-  if (!member.roles.cache.has(YETKILI_ROLE_ID))
-    return i.reply({ content: "❌ Yetkin yok", ephemeral: true });
-
-  const sicil = readSicil();
-
-  /* SICIL */
-  if (i.commandName === "sicil") {
-    const user = i.options.getUser("kullanıcı");
-
-    if (i.options.getSubcommand() === "ekle") {
-      const sebep = i.options.getString("sebep");
-      sicil[user.id] ??= [];
-      sicil[user.id].push(sebep);
-      writeSicil(sicil);
-      return i.reply(`✅ ${user.tag} siciline eklendi`);
-    }
-
-    if (i.options.getSubcommand() === "sil") {
-      delete sicil[user.id];
-      writeSicil(sicil);
-      return i.reply(`🗑️ ${user.tag} sicili silindi`);
-    }
-
-    if (i.options.getSubcommand() === "görüntüle") {
-      const list = sicil[user.id]?.join("\n• ") || "Kayıt yok";
-      return i.reply(`📄 **${user.tag} Sicil**\n• ${list}`);
-    }
+  if (interaction.commandName === "ping") {
+    return interaction.reply(`🏓 Ping: ${client.ws.ping}ms`);
   }
 
-  /* BAN */
-  if (i.commandName === "ban") {
-    const user = i.options.getUser("kullanıcı");
-    const sebep = i.options.getString("sebep") || "Sebep yok";
-    await i.guild.members.ban(user.id, { reason: sebep });
-    return i.reply(`⛔ ${user.tag} banlandı`);
+  if (!member.permissions.has(PermissionsBitField.Flags.Administrator)) {
+    return interaction.reply({ content: "❌ Yetkin yok", ephemeral: true });
   }
 
-  /* KICK */
-  if (i.commandName === "kick") {
-    const user = i.options.getUser("kullanıcı");
-    const sebep = i.options.getString("sebep") || "Sebep yok";
-    await i.guild.members.kick(user.id, sebep);
-    return i.reply(`👢 ${user.tag} kicklendi`);
+  const user = interaction.options.getUser("kullanıcı");
+
+  if (interaction.commandName === "kick") {
+    await interaction.guild.members.kick(user.id);
+    return interaction.reply(`👢 ${user.tag} atıldı`);
   }
 
-  /* TIMEOUT */
-  if (i.commandName === "timeout") {
-    const user = i.options.getUser("kullanıcı");
-    const dakika = i.options.getInteger("dakika");
-    const sebep = i.options.getString("sebep") || "Sebep yok";
+  if (interaction.commandName === "ban") {
+    await interaction.guild.members.ban(user.id);
+    return interaction.reply(`⛔ ${user.tag} banlandı`);
+  }
 
-    const m = await i.guild.members.fetch(user.id);
-    await m.timeout(dakika * 60 * 1000, sebep);
-    return i.reply(`⏱️ ${user.tag} ${dakika} dk timeout`);
+  if (interaction.commandName === "timeout") {
+    const süre = interaction.options.getInteger("süre");
+    const target = await interaction.guild.members.fetch(user.id);
+
+    await target.timeout(süre * 60 * 1000);
+    return interaction.reply(`🔇 ${user.tag} ${süre} dk susturuldu`);
   }
 });
 
+/* ================== SESTEN ATILIRSA ================== */
+client.on("voiceStateUpdate", (oldState, newState) => {
+  if (
+    oldState.member.id === client.user.id &&
+    oldState.channelId &&
+    !newState.channelId
+  ) {
+    const guild = oldState.guild;
+    setTimeout(() => connectVoice(guild), 3000);
+  }
+});
+
+/* ================== LOGIN ================== */
 client.login(process.env.TOKEN);
