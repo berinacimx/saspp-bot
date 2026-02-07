@@ -1,19 +1,21 @@
-/* 🔐 VOICE ENCRYPTION FIX (EN ÜSTE) */
+/* ================= VOICE FIX (EN ÜSTE) ================= */
 process.env.DISCORDJS_VOICE_FORCE_AES256 = "true"
+process.env.DISCORDJS_VOICE_USE_NODE_OPUS = "false"
+process.env.DISCORDJS_VOICE_USE_FFMPEG = "false"
+
 require("dotenv").config()
 
-const {
-  Client,
-  GatewayIntentBits,
-  Events,
-  ActivityType
+const { 
+  Client, 
+  GatewayIntentBits, 
+  Events, 
+  ActivityType 
 } = require("discord.js")
 
-const {
-  joinVoiceChannel,
-  getVoiceConnection,
-  VoiceConnectionStatus,
-  entersState
+const { 
+  joinVoiceChannel, 
+  getVoiceConnection, 
+  VoiceConnectionStatus 
 } = require("@discordjs/voice")
 
 const http = require("http")
@@ -34,22 +36,18 @@ http.createServer((req, res) => {
   res.end("OK")
 }).listen(process.env.PORT || 3000)
 
-/* ================= SES SİSTEMİ ================= */
-async function connectVoice(force = false) {
+/* ================= SES ================= */
+async function connectVoice() {
   try {
     const guild = await client.guilds.fetch(process.env.GUILD_ID)
-    if (!guild) return
+    const channel = guild.channels.cache.get(process.env.VOICE_CHANNEL_ID)
 
-    const channel = await guild.channels.fetch(process.env.VOICE_CHANNEL_ID)
     if (!channel || !channel.isVoiceBased()) {
       console.log("❌ Ses kanalı bulunamadı")
       return
     }
 
-    const existing = getVoiceConnection(guild.id)
-    if (existing && !force) return
-
-    if (existing) existing.destroy()
+    if (getVoiceConnection(guild.id)) return
 
     const connection = joinVoiceChannel({
       channelId: channel.id,
@@ -63,21 +61,14 @@ async function connectVoice(force = false) {
       console.log("🔊 Ses kanalına bağlanıldı")
     })
 
-    connection.on(VoiceConnectionStatus.Disconnected, async () => {
-      console.log("⚠️ Ses düştü, yeniden bağlanılıyor...")
-      setTimeout(() => connectVoice(true), 5000)
+    connection.on(VoiceConnectionStatus.Disconnected, () => {
+      console.log("⚠️ Ses düştü → yeniden bağlanıyor")
+      setTimeout(connectVoice, 7000)
     })
-
-    connection.on(VoiceConnectionStatus.Destroyed, () => {
-      console.log("❌ Ses bağlantısı destroy oldu, yeniden başlatılıyor...")
-      setTimeout(() => connectVoice(true), 5000)
-    })
-
-    await entersState(connection, VoiceConnectionStatus.Ready, 20_000)
 
   } catch (err) {
-    console.error("Ses bağlantı hatası:", err.message)
-    setTimeout(() => connectVoice(true), 5000)
+    console.error("❌ Ses bağlantı hatası:", err.message)
+    setTimeout(connectVoice, 7000)
   }
 }
 
@@ -90,9 +81,11 @@ client.once(Events.ClientReady, async () => {
   const guild = await client.guilds.fetch(process.env.GUILD_ID)
   let mode = 0
 
-  /* 🔥 RATE-LIMIT SAFE PRESENCE */
-  setInterval(() => {
+  /* ⛔ RATE LİMİT YEMEZ */
+  setInterval(async () => {
     try {
+      await guild.members.fetch({ withPresences: true })
+
       const total = guild.memberCount
       const online = guild.members.cache.filter(
         m => m.presence && m.presence.status !== "offline"
@@ -103,14 +96,14 @@ client.once(Events.ClientReady, async () => {
           ? { name: `${online} Online | ${total} Üye`, type: ActivityType.Watching }
           : { name: "San Andreas State Police #DESTAN", type: ActivityType.Playing }
 
-      client.user.setPresence({
+      await client.user.setPresence({
         activities: [activity],
         status: "online"
       })
 
       mode = (mode + 1) % 2
     } catch {}
-  }, 60000) // ⏱️ 60 sn = SAFE
+  }, 60_000) // ⬅️ 1 DAKİKA (güvenli)
 })
 
 /* ================= ÜYE GİRİNCE ================= */
@@ -119,20 +112,20 @@ client.on(Events.GuildMemberAdd, async member => {
     const welcome = member.guild.channels.cache.get(process.env.HOSGELDIN_KANAL_ID)
     if (welcome) {
       await welcome.send(
-        `<@${member.id}> Sunucumuza hoş geldin 👋\n` +
-        `Başvuru ve bilgilendirme kanallarını incelemeyi unutma.\n\n` +
+        `<@${member.id}> Sunucumuza hoş geldin 👋\n\n` +
         `**San Andreas State Police #𝐃𝐄𝐒𝐓𝐀𝐍**`
       )
     }
 
-    const kanalList = (process.env.ETIKET_KANALLAR || "")
+    const kanallar = (process.env.ETIKET_KANALLAR || "")
       .split(",")
       .map(x => x.trim())
       .filter(Boolean)
 
-    for (const id of kanalList) {
+    for (const id of kanallar) {
       const ch = member.guild.channels.cache.get(id)
       if (!ch) continue
+
       const msg = await ch.send(`<@${member.id}>`)
       setTimeout(() => msg.delete().catch(() => {}), 3000)
     }
