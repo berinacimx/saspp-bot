@@ -1,3 +1,5 @@
+/* 🔐 VOICE ENCRYPTION FIX (EN ÜSTE) */
+process.env.DISCORDJS_VOICE_FORCE_AES256 = "true"
 require("dotenv").config()
 
 const {
@@ -10,8 +12,7 @@ const {
 const {
   joinVoiceChannel,
   getVoiceConnection,
-  VoiceConnectionStatus,
-  entersState
+  VoiceConnectionStatus
 } = require("@discordjs/voice")
 
 const http = require("http")
@@ -27,27 +28,21 @@ const client = new Client({
 })
 
 /* ================= UPTIME ================= */
-http.createServer((_, res) => {
+http.createServer((req, res) => {
   res.writeHead(200)
   res.end("OK")
 }).listen(process.env.PORT || 3000)
 
-/* ================= SES KONTROL ================= */
-let reconnecting = false
-
-async function connectVoice(force = false) {
+/* ================= SES ================= */
+async function connectVoice() {
   try {
-    const guild = client.guilds.cache.get(process.env.GUILD_ID)
-    if (!guild) return console.log("❌ Guild bulunamadı")
+    const guild = await client.guilds.fetch(process.env.GUILD_ID)
+    if (!guild) return
 
     const channel = guild.channels.cache.get(process.env.VOICE_CHANNEL_ID)
-    if (!channel || !channel.isVoiceBased())
-      return console.log("❌ Ses kanalı geçersiz")
+    if (!channel || !channel.isVoiceBased()) return
 
-    const existing = getVoiceConnection(guild.id)
-    if (existing && !force) return
-
-    if (existing) existing.destroy()
+    if (getVoiceConnection(guild.id)) return
 
     const connection = joinVoiceChannel({
       channelId: channel.id,
@@ -57,29 +52,18 @@ async function connectVoice(force = false) {
       selfMute: false
     })
 
-    await entersState(connection, VoiceConnectionStatus.Ready, 30_000)
-    console.log("🔊 Ses kanalına bağlanıldı")
+    connection.on(VoiceConnectionStatus.Ready, () => {
+      console.log("🔊 Ses kanalına bağlanıldı")
+    })
 
-    connection.on(VoiceConnectionStatus.Disconnected, () => retryVoice())
-    connection.on(VoiceConnectionStatus.Destroyed, () => retryVoice())
-    connection.on(VoiceConnectionStatus.Signalling, () => retryVoice())
-
-  } catch (err) {
-    console.error("❌ Ses bağlantı hatası:", err)
-    retryVoice()
+    connection.on(VoiceConnectionStatus.Disconnected, async () => {
+      console.log("⚠️ Ses düştü, tekrar bağlanıyor...")
+      setTimeout(connectVoice, 5000)
+    })
+  } catch (e) {
+    console.error("Ses bağlantı hatası:", e.message)
+    setTimeout(connectVoice, 5000)
   }
-}
-
-function retryVoice() {
-  if (reconnecting) return
-  reconnecting = true
-
-  console.log("⚠️ Ses düştü → yeniden bağlanılıyor")
-
-  setTimeout(async () => {
-    reconnecting = false
-    await connectVoice(true)
-  }, 5000)
 }
 
 /* ================= READY ================= */
@@ -105,38 +89,47 @@ client.once(Events.ClientReady, async () => {
           ? { name: `${online} Online | ${total} Üye`, type: ActivityType.Watching }
           : { name: "San Andreas State Police #DESTAN", type: ActivityType.Playing }
 
-      client.user.setPresence({ activities: [activity], status: "online" })
+      client.user.setPresence({
+        activities: [activity],
+        status: "online"
+      })
+
       mode = (mode + 1) % 2
     } catch {}
-  }, 15_000)
+  }, 15000)
 })
 
 /* ================= ÜYE GİRİNCE ================= */
 client.on(Events.GuildMemberAdd, async member => {
   try {
-    const ch = member.guild.channels.cache.get(process.env.HOSGELDIN_KANAL_ID)
-    if (ch) {
-      await ch.send(
+    const welcome = member.guild.channels.cache.get(process.env.HOSGELDIN_KANAL_ID)
+    if (welcome) {
+      await welcome.send(
         `<@${member.id}> Sunucumuza hoş geldin 👋\n` +
         `Başvuru için <#${process.env.BASVURU_KANAL_ID}> kanalını inceleyebilirsin.\n\n` +
         `**San Andreas State Police #𝐃𝐄𝐒𝐓𝐀𝐍**`
       )
     }
 
-    for (const id of process.env.ETIKET_KANALLAR.split(",")) {
-      const c = member.guild.channels.cache.get(id)
-      if (!c) continue
-      const msg = await c.send(`<@${member.id}>`)
+    const kanalList = process.env.ETIKET_KANALLAR.split(",")
+    for (const id of kanalList) {
+      const ch = member.guild.channels.cache.get(id)
+      if (!ch) continue
+      const msg = await ch.send(`<@${member.id}>`)
       setTimeout(() => msg.delete().catch(() => {}), 3000)
     }
-  } catch (e) {
-    console.error("Üye giriş hatası:", e)
-  }
+  } catch {}
 })
 
-/* ================= GÜVENLİK ================= */
-process.on("unhandledRejection", console.error)
-process.on("uncaughtException", console.error)
+/* ================= KORUMA ================= */
+process.on("unhandledRejection", err => {
+  console.error("Unhandled Rejection:", err)
+})
+
+process.on("uncaughtException", err => {
+  console.error("Uncaught Exception:", err)
+})
+
 client.on("error", console.error)
 
 /* ================= LOGIN ================= */
