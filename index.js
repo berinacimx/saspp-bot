@@ -1,7 +1,12 @@
-/* 🔐 VOICE ENCRYPTION FIX (EN ÜSTE) */
+/* ======================================================
+   🔐 VOICE ENCRYPTION FIX (EN ÜSTE)
+====================================================== */
 process.env.DISCORDJS_VOICE_FORCE_AES256 = "true"
 require("dotenv").config()
 
+/* ======================================================
+   📦 IMPORTS
+====================================================== */
 const {
   Client,
   GatewayIntentBits,
@@ -17,7 +22,9 @@ const {
 
 const http = require("http")
 
-/* ================= CLIENT ================= */
+/* ======================================================
+   🤖 CLIENT
+====================================================== */
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -27,13 +34,17 @@ const client = new Client({
   ]
 })
 
-/* ================= UPTIME ================= */
+/* ======================================================
+   🌐 UPTIME (Railway / Render / Replit uyumlu)
+====================================================== */
 http.createServer((req, res) => {
   res.writeHead(200)
   res.end("OK")
 }).listen(process.env.PORT || 3000)
 
-/* ================= SES ================= */
+/* ======================================================
+   🔊 SES KANALI (AUTO RECONNECT)
+====================================================== */
 async function connectVoice() {
   try {
     const guild = await client.guilds.fetch(process.env.GUILD_ID)
@@ -56,17 +67,19 @@ async function connectVoice() {
       console.log("🔊 Ses kanalına bağlanıldı")
     })
 
-    connection.on(VoiceConnectionStatus.Disconnected, async () => {
-      console.log("⚠️ Ses düştü, tekrar bağlanıyor...")
+    connection.on(VoiceConnectionStatus.Disconnected, () => {
+      console.log("⚠️ Ses düştü, yeniden bağlanıyor...")
       setTimeout(connectVoice, 5000)
     })
-  } catch (e) {
-    console.error("Ses bağlantı hatası:", e.message)
+  } catch (err) {
+    console.error("Ses bağlantı hatası:", err.message)
     setTimeout(connectVoice, 5000)
   }
 }
 
-/* ================= READY ================= */
+/* ======================================================
+   🟢 READY
+====================================================== */
 client.once(Events.ClientReady, async () => {
   console.log(`🟢 Aktif: ${client.user.tag}`)
 
@@ -95,33 +108,48 @@ client.once(Events.ClientReady, async () => {
       })
 
       mode = (mode + 1) % 2
-    } catch {}
+    } catch (e) {
+      console.error("Presence hatası:", e.message)
+    }
   }, 15000)
 })
 
-/* ================= ÜYE GİRİNCE ================= */
+/* ======================================================
+   👤 ÜYE GİRİNCE
+====================================================== */
 client.on(Events.GuildMemberAdd, async member => {
   try {
+    /* 👋 HOŞGELDİN */
     const welcome = member.guild.channels.cache.get(process.env.HOSGELDIN_KANAL_ID)
     if (welcome) {
       await welcome.send(
         `<@${member.id}> Sunucumuza hoş geldin 👋\n` +
-        `Başvuru için <#${process.env.BASVURU_KANAL_ID}> kanalını inceleyebilirsin.\n\n` +
+        `Başvuru ve bilgilendirme kanallarını incelemeyi unutma.\n\n` +
         `**San Andreas State Police #𝐃𝐄𝐒𝐓𝐀𝐍**`
       )
     }
 
-    const kanalList = process.env.ETIKET_KANALLAR.split(",")
+    /* 🔔 ETİKET AT → SİL */
+    const kanalList = (process.env.ETIKET_KANALLAR || "")
+      .split(",")
+      .map(x => x.trim())
+      .filter(Boolean)
+
     for (const id of kanalList) {
       const ch = member.guild.channels.cache.get(id)
       if (!ch) continue
+
       const msg = await ch.send(`<@${member.id}>`)
       setTimeout(() => msg.delete().catch(() => {}), 3000)
     }
-  } catch {}
+  } catch (err) {
+    console.error("Üye giriş hatası:", err)
+  }
 })
 
-/* ================= KORUMA ================= */
+/* ======================================================
+   🛡️ GLOBAL KORUMA (CRASH YEMEZ)
+====================================================== */
 process.on("unhandledRejection", err => {
   console.error("Unhandled Rejection:", err)
 })
@@ -132,5 +160,7 @@ process.on("uncaughtException", err => {
 
 client.on("error", console.error)
 
-/* ================= LOGIN ================= */
+/* ======================================================
+   🔐 LOGIN
+====================================================== */
 client.login(process.env.TOKEN)
