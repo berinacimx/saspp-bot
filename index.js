@@ -27,6 +27,8 @@ const client = new Client({
   ]
 })
 
+let reconnecting = false
+
 /* ================= UPTIME ================= */
 
 http.createServer((_, res) => {
@@ -34,21 +36,25 @@ http.createServer((_, res) => {
   res.end("OK")
 }).listen(process.env.PORT || 3000)
 
-/* ================= VOICE CONNECT ================= */
+/* ================= VOICE ================= */
 
 async function connectVoice() {
+  if (reconnecting) return
+  reconnecting = true
+
   try {
     console.log("🎧 Ses bağlantısı deneniyor...")
 
-    const guild = client.guilds.cache.get(process.env.GUILD_ID)
-    if (!guild) return console.log("❌ Guild bulunamadı")
+    const guild = await client.guilds.fetch(process.env.GUILD_ID).catch(() => null)
+    if (!guild) throw new Error("Guild bulunamadı")
 
     const channel = guild.channels.cache.get(process.env.VOICE_CHANNEL_ID)
     if (!channel || !channel.isVoiceBased())
-      return console.log("❌ Ses kanalı geçersiz")
+      throw new Error("Ses kanalı geçersiz")
 
     if (getVoiceConnection(guild.id)) {
       console.log("ℹ️ Zaten sese bağlı")
+      reconnecting = false
       return
     }
 
@@ -57,20 +63,36 @@ async function connectVoice() {
       guildId: guild.id,
       adapterCreator: guild.voiceAdapterCreator,
       selfDeaf: true,
-      selfMute: false
+      selfMute: false,
+      encryptionMode: "aead_xchacha20_poly1305_rtpsize"
     })
 
-    await entersState(connection, VoiceConnectionStatus.Ready, 15_000)
-    console.log("🔊 Bot sese bağlandı")
+    await entersState(connection, VoiceConnectionStatus.Ready, 20_000)
+    console.log("🔊 Bot sese başarıyla bağlandı")
 
-    connection.on(VoiceConnectionStatus.Disconnected, () => {
-      console.log("⚠️ Ses koptu, tekrar bağlanıyor...")
-      setTimeout(connectVoice, 8000)
+    reconnecting = false
+
+    connection.on(VoiceConnectionStatus.Disconnected, async () => {
+      console.log("⚠️ Ses bağlantısı koptu")
+
+      try {
+        await Promise.race([
+          entersState(connection, VoiceConnectionStatus.Signalling, 5_000),
+          entersState(connection, VoiceConnectionStatus.Connecting, 5_000)
+        ])
+      } catch {
+        console.log("🔁 Yeniden bağlanılıyor...")
+        setTimeout(() => {
+          reconnecting = false
+          connectVoice()
+        }, 8000)
+      }
     })
 
   } catch (err) {
-    console.error("🔴 Ses hatası:", err)
-    setTimeout(connectVoice, 10_000)
+    console.error("🔴 Ses hatası:", err.message)
+    reconnecting = false
+    setTimeout(connectVoice, 12_000)
   }
 }
 
@@ -79,7 +101,7 @@ async function connectVoice() {
 client.once(Events.ClientReady, async () => {
   console.log(`🟢 Bot aktif: ${client.user.tag}`)
 
-  await connectVoice()
+  setTimeout(connectVoice, 5000)
 
   let mode = 0
 
@@ -106,9 +128,7 @@ client.once(Events.ClientReady, async () => {
       })
 
       mode = (mode + 1) % activities.length
-    } catch (e) {
-      console.error("Presence error:", e.message)
-    }
+    } catch {}
   }, 60_000)
 })
 
@@ -116,45 +136,35 @@ client.once(Events.ClientReady, async () => {
 
 client.on(Events.GuildMemberAdd, async member => {
   try {
-    /* ===== OTOROL ===== */
+    /* OTOROL */
+    const role = member.guild.roles.cache.get(process.env.OTOROL_ID)
+    if (role) await member.roles.add(role).catch(() => {})
 
-    const roleId = process.env.OTOROL_ID
-    if (roleId) {
-      const role = member.guild.roles.cache.get(roleId)
-      if (role) await member.roles.add(role)
-    }
-
-    /* ===== HOŞGELDİN ===== */
-
-    const welcomeChannel = member.guild.channels.cache.get(
-      process.env.HOSGELDIN_KANAL_ID
-    )
-
-    if (welcomeChannel) {
-      await welcomeChannel.send(
+    /* HOŞGELDİN */
+    const welcome = member.guild.channels.cache.get(process.env.HOSGELDIN_KANAL_ID)
+    if (welcome) {
+      await welcome.send(
         `<@${member.id}> Sunucumuza hoş geldin 👋\n` +
         `Başvuru ve bilgilendirme kanallarını incelemeyi unutma.\n\n` +
         `San Andreas State Police #𝐃𝐄𝐒𝐓𝐀𝐍`
       )
     }
 
-    /* ===== ETİKET ATMA ===== */
-
-    const channels = (process.env.ETIKET_KANALLAR || "")
+    /* ETİKET */
+    const list = (process.env.ETIKET_KANALLAR || "")
       .split(",")
       .map(x => x.trim())
       .filter(Boolean)
 
-    for (const id of channels) {
+    for (const id of list) {
       const ch = member.guild.channels.cache.get(id)
       if (!ch) continue
-
       const msg = await ch.send(`<@${member.id}>`)
       setTimeout(() => msg.delete().catch(() => {}), 3000)
     }
 
-  } catch (err) {
-    console.error("GuildMemberAdd error:", err)
+  } catch (e) {
+    console.error("MemberAdd error:", e.message)
   }
 })
 
