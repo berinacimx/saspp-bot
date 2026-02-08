@@ -1,13 +1,19 @@
-process.env.DISCORDJS_VOICE_FORCE_AES256 = "true"
 require("dotenv").config()
 
-const { Client, GatewayIntentBits, Events, ActivityType } = require("discord.js")
+const { 
+  Client, 
+  GatewayIntentBits, 
+  Events, 
+  ActivityType 
+} = require("discord.js")
+
 const {
   joinVoiceChannel,
   VoiceConnectionStatus,
   entersState,
   getVoiceConnection
 } = require("@discordjs/voice")
+
 const http = require("http")
 
 /* ================= CLIENT ================= */
@@ -32,11 +38,21 @@ http.createServer((_, res) => {
 
 async function connectVoice() {
   try {
-    const guild = await client.guilds.fetch(process.env.GUILD_ID)
-    const channel = await guild.channels.fetch(process.env.VOICE_CHANNEL_ID)
-    if (!channel || !channel.isVoiceBased()) return
+    console.log("🎧 Ses bağlantısı deneniyor...")
 
-    if (getVoiceConnection(guild.id)) return
+    const guild = client.guilds.cache.get(process.env.GUILD_ID)
+    if (!guild) return console.log("❌ Guild bulunamadı")
+
+    const channel = guild.channels.cache.get(process.env.VOICE_CHANNEL_ID)
+    if (!channel) return console.log("❌ Ses kanalı bulunamadı")
+
+    if (!channel.isVoiceBased())
+      return console.log("❌ Kanal ses kanalı değil")
+
+    if (getVoiceConnection(guild.id)) {
+      console.log("ℹ️ Zaten sese bağlı")
+      return
+    }
 
     const connection = joinVoiceChannel({
       channelId: channel.id,
@@ -47,15 +63,15 @@ async function connectVoice() {
     })
 
     await entersState(connection, VoiceConnectionStatus.Ready, 15_000)
-    console.log("🔊 Bot sese bağlandı")
+    console.log("🔊 Bot sese başarıyla bağlandı")
 
-    connection.on(VoiceConnectionStatus.Disconnected, async () => {
-      console.log("⚠️ Ses düştü, tekrar bağlanıyor...")
+    connection.on(VoiceConnectionStatus.Disconnected, () => {
+      console.log("⚠️ Ses bağlantısı koptu, tekrar bağlanılıyor...")
       setTimeout(connectVoice, 8000)
     })
 
   } catch (err) {
-    console.error("🔴 Ses hatası:", err.message)
+    console.error("🔴 Ses hatası:", err)
     setTimeout(connectVoice, 10_000)
   }
 }
@@ -63,13 +79,16 @@ async function connectVoice() {
 /* ================= READY ================= */
 
 client.once(Events.ClientReady, async () => {
-  console.log(`🟢 Aktif: ${client.user.tag}`)
+  console.log(`🟢 Bot aktif: ${client.user.tag}`)
+
   await connectVoice()
 
   let mode = 0
   setInterval(async () => {
     try {
-      const guild = await client.guilds.fetch(process.env.GUILD_ID)
+      const guild = client.guilds.cache.get(process.env.GUILD_ID)
+      if (!guild) return
+
       await guild.members.fetch({ withPresences: true })
 
       const total = guild.memberCount
@@ -89,7 +108,7 @@ client.once(Events.ClientReady, async () => {
 
       mode = (mode + 1) % activities.length
     } catch {}
-  }, 60_000) // RATE LIMIT SAFE
+  }, 60_000)
 })
 
 /* ================= MEMBER ADD ================= */
@@ -98,30 +117,40 @@ client.on(Events.GuildMemberAdd, async member => {
   try {
     const welcome = member.guild.channels.cache.get(process.env.HOSGELDIN_KANAL_ID)
     if (welcome) {
-      await welcome.send(`<@${member.id}> Sunucumuza hoş geldin 👋
-Başvuru ve bilgilendirme kanallarını incelemeyi unutma.
-
-San Andreas State Police #𝐃𝐄𝐒𝐓𝐀𝐍`)
+      await welcome.send(
+        `<@${member.id}> Sunucumuza hoş geldin 👋\n` +
+        `Başvuru ve bilgilendirme kanallarını incelemeyi unutma.\n\n` +
+        `San Andreas State Police #𝐃𝐄𝐒𝐓𝐀𝐍`
+      )
     }
 
     const list = (process.env.ETIKET_KANALLAR || "")
-      .split(",").map(x => x.trim()).filter(Boolean)
+      .split(",")
+      .map(x => x.trim())
+      .filter(Boolean)
 
     for (const id of list) {
       const ch = member.guild.channels.cache.get(id)
       if (!ch) continue
+
       const msg = await ch.send(`<@${member.id}>`)
       setTimeout(() => msg.delete().catch(() => {}), 3000)
     }
-  } catch {}
+  } catch (e) {
+    console.error("MemberAdd error:", e.message)
+  }
 })
 
 /* ================= GUARD ================= */
 
-process.on("unhandledRejection", e => console.error("Unhandled:", e.message))
-process.on("uncaughtException", e => console.error("Crash:", e.message))
+process.on("unhandledRejection", e =>
+  console.error("UnhandledRejection:", e)
+)
+
+process.on("uncaughtException", e =>
+  console.error("UncaughtException:", e)
+)
 
 /* ================= LOGIN ================= */
 
 client.login(process.env.TOKEN)
-
